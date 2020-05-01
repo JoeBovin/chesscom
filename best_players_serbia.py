@@ -14,42 +14,48 @@ class Player(object):
 		self.won_games = 0
 		self.win_percent = 0
 
-TeamUrl = 'https://api.chess.com/pub/club/srbija-tim'
-GameIdsList = ['6458', '6459', '6465', '5999', '6000', '6001', '6222', '6223', '6224', '6300', '6301', '6302', '6605', '6606', '6607', '6757', '6759', '6760', '7260', '7261', '7262']
+Team = 'srbija-tim'
+GameIdsList = ['6458', '6459', '6465', '5999', '6000', '6001', '6222', '6223', '6224', '6300', '6301', '6302', '6605', '6606', '6607', '6757', '6759', '6760', '7260', '7261', '7262', '8936', '8937', '8938']
+
 TeamMembers = []
-NonTeamMembers = []
 Players = []
+NonTeamMembers = []
+ClosedAccount = []
 
 def collect_team_members():
-	for player in get(TeamUrl + '/members')['weekly']:
+	members = get('https://api.chess.com/pub/club/' + Team + '/members')
+	for player in members['weekly']:
 		TeamMembers.append(player['username'])
-	for player in get(TeamUrl + '/members')['monthly']:
+	for player in members['monthly']:
 		TeamMembers.append(player['username'])
-	for player in get(TeamUrl + '/members')['all_time']:
+	for player in members['all_time']:
 		TeamMembers.append(player['username'])
 
-def add_player(newplayer):
+def add_player(PlayerList, newplayer):
 	inlist = False
-	for player in Players:
+	for player in PlayerList:
 		if player.name == newplayer.name:
 			player.num_games += newplayer.num_games
 			player.won_games += newplayer.won_games
 			inlist = True
 	if inlist == False:
-		Players.append(newplayer)
+		PlayerList.append(newplayer)
 
 
-def collect_all_players_from_one_match(team):
-	for player in team:
-		if 'stats' in player:
-			username = player['username']
-			if username in TeamMembers:
+def collect_all_players_from_one_match(url, team):
+	if len(team) > 0:
+		for player in team:
+			if 'stats' in player:
+				username = player['username']
 				newPlayer = Player(username)
 				newPlayer.won_games += get(player['board'])['board_scores'][newPlayer.name]
 				newPlayer.num_games += 2
-				add_player(newPlayer)
-			else:
-				NonTeamMembers.append(username)
+				if username in TeamMembers:
+					add_player(Players, newPlayer)
+				else:
+					add_player(NonTeamMembers, newPlayer)
+	else:
+		print('Match %s is not played or not published in live API yet' % (url))
 
 
 
@@ -58,9 +64,9 @@ def collect_all_players_from_one_url(url, teamName):
 	if 'teams' in match:
 		teams = get(url)['teams']
 		if teams['team1']['name'] == teamName:
-			collect_all_players_from_one_match(teams['team1']['players'])
+			collect_all_players_from_one_match(url, teams['team1']['players'])
 		elif teams['team2']['name'] == teamName:
-			collect_all_players_from_one_match(teams['team2']['players'])
+			collect_all_players_from_one_match(url, teams['team2']['players'])
 		else:
 			print('Problem with match id %s: %s or %s are not %s' % (url, teams['team1']['name'], teams['team2']['name'], teamName))
 	else:
@@ -68,7 +74,9 @@ def collect_all_players_from_one_url(url, teamName):
 
 def collect_all_players_from_all_urls(teamName):
 	for id in GameIdsList:
-		collect_all_players_from_one_url('https://api.chess.com/pub/match/live/' + id, teamName)
+		url = 'https://api.chess.com/pub/match/live/' + id
+		print('fetching url %s' % (url))
+		collect_all_players_from_one_url(url, teamName)
 
 def calculate_win_percent():
 	for player in Players:
@@ -89,15 +97,22 @@ def print_players_per_win_percent():
 	print('\n')
 
 def print_players_that_left():
-	ntm = list(set(NonTeamMembers)) # make sure to print unique entries
-	size = len(ntm)
+	size = len(NonTeamMembers)
 	print('Players that left your team : ', size)
-	for player in ntm:
-		print('@%s' % (player))
-	print('\n')
+	for player in NonTeamMembers:
+		profile = get('https://api.chess.com/pub/player/'+player.name)
+		status = profile['status']
+		if status.startswith('closed'):
+			player.status = status
+			ClosedAccount.append(player)
+		else:
+			print('@%s : %.1f/%d' % (player.name, player.won_games, player.num_games))
+	print('Closed Account (not necessarily fairplay) :')
+	for player in ClosedAccount:
+		print('@%s (%s)' % (player.name, player.status))
 
 def main():
-	team = get(TeamUrl)
+	team = get('https://api.chess.com/pub/club/' + Team)
 	if 'name' in team:
 		TeamName = team['name']
 		collect_team_members()
@@ -106,7 +121,7 @@ def main():
 		size = len(Players)
 		print('Number of player : ', size)
 		print_players_per_wins()
-		print_players_per_win_percent()
+		#print_players_per_win_percent()
 		print_players_that_left()
 	else:
 		print('Unknow team')
